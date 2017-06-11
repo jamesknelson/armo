@@ -1,0 +1,1 @@
+This directory contains notes on design and implementation. It is primarily aimed at armo contributors.
