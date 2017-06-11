@@ -62,10 +62,21 @@ class FocusManager {
       return
     }
 
-    // If we're adding the first focusable ancestor to a top-level group,
-    // we'll also need to give the group a tabIndex.
-    if (top && top.type === 'group' && top.modalId === this.currentModalId && !this.getFirstFocusableChild(top)) {
-      this.setTabIndex(top.id)
+    if (top && top.modalId === this.currentModalId) {
+      // If we're adding the first focusable descendent to a top-level group,
+      // we'll also need to give the group a tabIndex.
+      if (top.type === 'group' && !this.getFirstFocusableChild(top)) {
+        this.setTabIndex(top.id)
+      }
+
+      // If we're adding the first focusable descendent to a non-top group,
+      // we'll need to make it clickable by giving it a -1 tabIndex.
+      for (let id of path.slice(path.indexOf(top.id) + 1)) {
+        const control = this.controls[id]
+        if (control.type === 'group' && !this.getFirstFocusableChild(control)) {
+          this.setTabIndex(control.id, null)
+        }
+      }
     }
 
     // Add this control to the parent's list of children
@@ -92,6 +103,7 @@ class FocusManager {
       if (x.length === len) {
         x.push(id)
       }
+      console.log(x)
     }
 
     if (type !== 'focusable') {
@@ -655,18 +667,22 @@ class FocusManager {
   setTabIndex(id, offset=0) {
     const control = this.controls[id]
 
-    if (offset === false && control.tabIndex !== undefined) {
-      delete control.tabIndex
-      if (control.node) {
-        control.node.tabIndex = undefined
+    if (offset === false) {
+      if (control.tabIndex !== undefined) {
+        delete control.tabIndex
+        if (control.node) {
+          control.node.tabIndex = undefined
+        }
       }
       return
     }
 
-    if (offset === null && control.tabIndex !== -1) {
-      control.tabIndex = -1
-      if (control.node) {
-        control.node.tabIndex = -1
+    if (offset === null) {
+      if (control.tabIndex !== -1) {
+        control.tabIndex = -1
+        if (control.node) {
+          control.node.tabIndex = -1
+        }
       }
       return
     }
@@ -703,18 +719,13 @@ class FocusManager {
     // Otheriwse find the first non-matching parent and compare its indexes
     const start = left.modalId ? (left.path.indexOf(modalId) + 2) : 1
     const end = Math.min(left.path.length, right.path.length)
-    for (let i = start; i < end; i++) {
-      const leftId = left.path[i]
-      const rightId = right.path[i]
+    for (let i = start; i <= end; i++) {
+      const leftId = left.path[i] || left.id
+      const rightId = right.path[i] || right.id
 
       if (leftId !== rightId) {
         return compareSiblingControls(this.controls[leftId], this.controls[rightId]) === 1
       }
-    }
-
-    if (left.path.length === right.path.length) {
-      // We're siblings
-      return compareSiblingControls(left, right) === 1
     }
 
     // If all matching ids match, then whichever has the shorter path is left

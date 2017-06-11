@@ -24,7 +24,7 @@ class Control extends Component {
 
     return this.props.connectFocusable(
       <div style={style}>
-        {this.props.label}
+        {this.props.label} - {this.props.id}
       </div>
     )
   }
@@ -56,7 +56,7 @@ class Group extends Component {
 
     return props.connectFocusable(
       <div style={style}>
-        GROUP
+        GROUP - {this.props.id}
         {content}
       </div>
     )
@@ -88,7 +88,15 @@ export default class FocusExample extends Component {
         <Group bus={bus} focusableType='group'>
           <Control label='C.1' />
           <Control label='C.2' />
-          <Control label='C.3' />
+          <Group bus={bus} focusableType='group'>
+            <Control label='C.3.i' />
+            <Group bus={bus} focusableType='group' />
+            <Group bus={bus} focusableType='group'>
+              <Control label='C.3.ii' />
+            </Group>
+            <Control label='C.3.iii' />
+          </Group>
+          <Control label='C.4' />
         </Group>
         <Control bus={bus} label='D' />
         <Control bus={bus} label='E' />

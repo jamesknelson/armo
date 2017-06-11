@@ -178,6 +178,9 @@ export default class FocusController extends Controller {
       focused: this.state.focused,
       childrenFocused: this.state.childrenFocused,
 
+      // TODO: delete this
+      id: this.id,
+
       bus: {
         ...this.props.bus,
         focusManager: this.state.childFocusManager,
