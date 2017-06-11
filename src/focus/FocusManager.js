@@ -103,7 +103,6 @@ class FocusManager {
       if (x.length === len) {
         x.push(id)
       }
-      console.log(x)
     }
 
     if (type !== 'focusable') {
@@ -360,7 +359,7 @@ class FocusManager {
     // on the direction from which we approach the group.
     if (!direct && this.controls[id].type === 'focusable') {
       const latest = this.controls[id].latest
-      for (let i = latest.length - 1; i > 0; i--) {
+      for (let i = latest.length - 1; i >= 0; i--) {
         const control = this.controls[latest[i]]
         if (control && control.type === 'focusable') {
           id = latest[i]
@@ -502,7 +501,7 @@ class FocusManager {
     let didModalBlur
     for (let blurId of pathLosingFocus) {
       if (this.controls[blurId].type === 'modal') {
-        Object.assign(tabIndexChanges, this.getModalOffets(blurId, null))
+        Object.assign(tabIndexChanges, this.getModalOffsets(blurId, null))
         didModalBlur = true
         break
       }
@@ -512,7 +511,7 @@ class FocusManager {
     let didModalFocus
     for (let focusId of pathReceivingFocus) {
       if (this.controls[focusId].type === 'modal') {
-        Object.assign(tabIndexChanges, this.getModalOffets(focusId))
+        Object.assign(tabIndexChanges, this.getModalOffsets(focusId))
         this.currentModalId = focusId
         didModalFocus = true
         break
@@ -523,7 +522,7 @@ class FocusManager {
     // need to remove tabIndexes from the existing modal
     if (didModalFocus && !didModalBlur) {
       const topModalId = pathKeepingFocus.find(id => this.controls[id].type === 'modal')
-      Object.assign(tabIndexChanges, this.getModalOffets(topModalId, null))
+      Object.assign(tabIndexChanges, this.getModalOffsets(topModalId, null))
     }
 
     // If we've blurred a modal without focusing a new one, find the topmost
@@ -531,7 +530,7 @@ class FocusManager {
     if (didModalBlur && !didModalFocus) {
       const topModalId = pathKeepingFocus.find(id => this.controls[id].type === 'modal')
       this.currentModalId = topModalId
-      Object.assign(tabIndexChanges, this.getModalOffets(topModalId))
+      Object.assign(tabIndexChanges, this.getModalOffsets(topModalId))
     }
 
     // The order here is important - if the same id appears multiple times in
@@ -624,8 +623,8 @@ class FocusManager {
     const tabIndexChanges = {}
 
     if (this.currentModalId) {
-      Object.assign(tabIndexChanges, this.getModalOffets(this.currentModalId, null))
-      Object.assign(tabIndexChanges, this.getModalOffets())
+      Object.assign(tabIndexChanges, this.getModalOffsets(this.currentModalId, null))
+      Object.assign(tabIndexChanges, this.getModalOffsets())
     }
     else {
       tabIndexChanges[this.relatedIds.previousId] = null
@@ -717,7 +716,7 @@ class FocusManager {
     }
 
     // Otheriwse find the first non-matching parent and compare its indexes
-    const start = left.modalId ? (left.path.indexOf(modalId) + 2) : 1
+    const start = left.modalId ? (left.path.indexOf(left.modalId) + 2) : 1
     const end = Math.min(left.path.length, right.path.length)
     for (let i = start; i <= end; i++) {
       const leftId = left.path[i] || left.id
@@ -784,7 +783,7 @@ class FocusManager {
       const x = control.top.tabFocusableDescendents
 
       if (x.length === 0) {
-        return {}
+        this.relatedIds = {}
       }
       else if (control.parent.type === 'group') {
         const i = x.indexOf(control.id)
@@ -794,36 +793,45 @@ class FocusManager {
         }
       }
       else if (this.isLeftOrderedBeforeRight(control, this.controls[x[0]])) {
-        return {
+        this.relatedIds = {
           nextId: x[0],
         }
       }
       else {
+        const ancestorIds = []
+        let parent = control.parent
+        while (parent && parent.type === 'focusable') {
+          ancestorIds.push(parent.id)
+          parent = parent.parent
+        }
+
         let left
-        for (let id of x) {
+        for (let id of x.filter(id => ancestorIds.indexOf(id) === -1)) {
           const testControl = this.controls[id]
           if (this.isLeftOrderedBeforeRight(control, testControl)) {
-            left = id
-          }
-          else {
-            return {
+            this.relatedIds = {
               previousId: left,
               nextId: id
             }
+            return
           }
+          left = id
+        }
+        this.relatedIds = {
+          previousId: left,
         }
       }
     }
   }
 
-  getModalOffets(modalId, forceTo) {
+  getModalOffsets(modalId, forceTo) {
     const tabIndexes = {}
-    const control = this.controls[modalId]
+    const children = modalId ? this.controls[modalId].children : Object.keys(this.controls).filter(id => !this.controls[id].parent)
 
-    for (let childId of control.children) {
+    for (let childId of children) {
       const childControl = this.controls[childId]
       if (childControl.type !== 'modal') {
-        tabIndexes[childId] = forceTo === null ? -1 : childControl.index*2
+        tabIndexes[childId] = forceTo === undefined ? 0 : null
       }
     }
 
