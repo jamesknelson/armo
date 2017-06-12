@@ -1,3 +1,8 @@
+// FIXME:
+// - "blur" should not exit a modal -- only focusing another control or destroying the modal should exit it
+// - "blur" (e.g. from alt-tab) should not cause the user to lose their location inside a group
+
+
 import getNextUniqueId from '../util/getNextUniqueId'
 
 
@@ -6,6 +11,38 @@ function compareSiblingControls(left, right) {
     return Math.sign(right.id - left.id)
   }
   return Math.sign(right.index - left.index)
+}
+
+// Work backwords from closest to old control, to closest to root
+function callWillLoseFocusLifecycle(control, blurredAncestors) {
+  const cwlfLifecycle = control.controller.controlWillLoseFocus
+  if (cwlfLifecycle) {
+    cwlfLifecycle.call(control.controller)
+  }
+
+  for (let control of blurredAncestors) {
+    const cwlfLifecycle = control.controller.childrenWillLoseFocus
+    if (cwlfLifecycle) {
+      cwlfLifecycle.call(control.controller)
+    }
+  }
+}
+
+// Work upwards from fartherst ancestor to old control
+function callDidLoseFocusLifecycle(blurredAncestors, control) {
+  // Need to check if the control still exists, as it may have been
+  // destroyed in an earlier controller
+  for (let control of blurredAncestors.filter(x => x)) {
+    const cdlfLifecycle = control.controller.childrenDidLoseFocus
+    if (cdlfLifecycle) {
+      cdlfLifecycle.call(control.controller)
+    }
+  }
+
+  const cdlfLifecycle = control && control.controller.controlDidLoseFocus
+  if (cdlfLifecycle) {
+    cdlfLifecycle.call(control.controller)
+  }
 }
 
 
@@ -25,7 +62,7 @@ class FocusManager {
     console.log('TODO: destroyabole focus manager')
   }
 
-  addControl(id, path, type, index, lifecycle) {
+  addControl(id, path, type, index, controller) {
     const parent = this.controls[path[path.length-1]]
 
     let top, modalId
@@ -49,7 +86,7 @@ class FocusManager {
       path,
       parent,
       index: index || 0,
-      lifecycle,
+      controller,
       latest: [],
       children: [],
     }
@@ -66,7 +103,7 @@ class FocusManager {
       // If we're adding the first focusable descendent to a top-level group,
       // we'll also need to give the group a tabIndex.
       if (top.type === 'group' && !this.getFirstFocusableChild(top)) {
-        this.setTabIndex(top.id)
+        this.setTabOffset(top.id, 0)
       }
 
       // If we're adding the first focusable descendent to a non-top group,
@@ -74,7 +111,7 @@ class FocusManager {
       for (let id of path.slice(path.indexOf(top.id) + 1)) {
         const control = this.controls[id]
         if (control.type === 'group' && !this.getFirstFocusableChild(control)) {
-          this.setTabIndex(control.id, null)
+          this.setTabOffset(control.id, null)
         }
       }
     }
@@ -110,10 +147,12 @@ class FocusManager {
       return
     }
 
+    let tabOffset = null
+
     // If our direct parent is the active modal, we need a tabIndex with no
     // offset
     if (!parent ? !this.currentModalId : (parent.id === this.currentModalId)) {
-      this.setTabIndex(id)
+      tabOffset = 0
     }
     // If we share top with the currently active control then its next/previous
     // ids may change (as we may be inserted between them and the active
@@ -121,36 +160,15 @@ class FocusManager {
     else if (!this.runningFocusLifecycle && this.controls[this.currentId] && this.controls[this.currentId].top === top) {
       const oldRelated = this.relatedIds
       this.calculateRelated()
-      if (this.relatedIds.nextId === id) {
-        this.setTabIndex(id, 1)
-        if (oldRelated.nextId) {
-          this.setTabIndex(oldRelated.nextId, null)
-        }
+      if (this.relatedIds.nextId === id && !oldRelated.nextId) {
+        tabOffset = 1
       }
-      else if (this.relatedIds.previousId === id) {
-        this.setTabIndex(id, -1)
-        if (oldRelated.previousId) {
-          this.setTabIndex(oldRelated.previousId, null)
-        }
+      else if (this.relatedIds.previousId === id && !oldRelated.previousId) {
+        tabOffset = -1
       }
     }
 
-    if (control.tabIndex === undefined) {
-      this.setTabIndex(id, null)
-    }
-  }
-
-  setNode(id, node) {
-    const control = this.controls[id]
-    if (control) {
-      control.node = node
-      if (control.tabIndex !== undefined) {
-        control.node.tabIndex = control.tabIndex
-      }
-      if (id === this.currentId) {
-        node.focus()
-      }
-    }
+    this.setTabOffset(id, tabOffset)
   }
 
   destroyControl(id) {
@@ -191,10 +209,10 @@ class FocusManager {
     // If this is the last focusable control of a top group in the current
     // modal, remove its tabIndex
     if (top.type === 'group' && top.modalId === this.currentModalId && !this.getFirstFocusableChild(top)) {
-      this.setTabIndex(top, false)
+      this.backend.setTabIndex(top.id, undefined)
     }
 
-    // If we're running focus lifecycle, then a `focus()` call is already
+    // If we're running focus controller, then a `focus()` call is already
     // scheduled, so we can return instead of focusing another item or
     // updating tabindexes.
     if (this.runningFocusLifecycle) {
@@ -208,14 +226,14 @@ class FocusManager {
       this.calculateRelated()
       const nextId = this.relatedIds.nextId
       if (nextId) {
-        this.setTabIndex(nextId, 1)
+        this.setTabOffset(nextId, 1)
       }
     }
     else if (oldRelated.previousId === id) {
       this.calculateRelated()
       const previousId = this.relatedIds.previousId
       if (previousId) {
-        this.setTabIndex(previousId, -1)
+        this.setTabOffset(previousId, -1)
       }
     }
 
@@ -314,7 +332,7 @@ class FocusManager {
     if (!currentControl ? !control.modalId : (this.currentModalId === parent.id && currentControl.top !== control)) {
       // If we're at the top of the current modal but not the top of the
       // currently active control, just set our own tabIndex
-      this.setTabIndex(id)
+      this.setTabOffset(id, 0)
       return
     }
 
@@ -326,7 +344,7 @@ class FocusManager {
 
     if (this.runningFocusLifecycle) {
       // If we're a nested control and this method is called from within a
-      // lifecycle method, then any tabindex changes will be performed by
+      // controller method, then any tabindex changes will be performed by
       // the focus() method, so we're done.
       return
     }
@@ -336,23 +354,19 @@ class FocusManager {
     // may change.
     const oldRelated = this.relatedIds
     this.calculateRelated()
-    const tabIndexChanges = {}
+    const tabOffsetChanges = {}
     if (oldRelated.nextId !== this.relatedIds.nextId) {
-      tabIndexChanges[oldRelated.nextId] = null
+      tabOffsetChanges[oldRelated.nextId] = null
     }
     if (oldRelated.previousId !== this.relatedIds.previousId) {
-      tabIndexChanges[oldRelated.previousId] = null
+      tabOffsetChanges[oldRelated.previousId] = null
     }
-    tabIndexChanges[this.relatedIds.nextId] = 1
-    tabIndexChanges[this.relatedIds.previousId] = -1
-    this.changeTabIndexes(tabIndexChanges)
+    tabOffsetChanges[this.relatedIds.nextId] = 1
+    tabOffsetChanges[this.relatedIds.previousId] = -1
+    this.setTabOffsets(tabOffsetChanges)
   }
 
   focus(id, direct=false) {
-    if (this.focusingNode) {
-      return
-    }
-
     // If we're not specifically focusing this id, see if it has a previously
     // focused child that still exists that we can focus instead.
     // Note: we don't do this for groups, as the best child to focus depends
@@ -377,7 +391,7 @@ class FocusManager {
     }
 
     const control = this.controls[id]
-    const { type, node, path, lifecycle } = this.controls[id]
+    const { type, path, controller } = this.controls[id]
 
     if (type === 'modal') {
       throw new Error(`FocusManager: You cannot focus a control with type 'modal'. Instead focus a 'focusable' child of your 'modal' control.`)
@@ -385,6 +399,16 @@ class FocusManager {
 
     let firstFocusableChild
     if (type === 'group') {
+      // Don't focus a group if one of its descendents is already focused
+      const currentControl = this.controls[this.currentId]
+      let nextParent = currentControl && currentControl.parent
+      while (nextParent) {
+        if (nextParent === control) {
+          return
+        }
+        nextParent = nextParent.parent
+      }
+
       firstFocusableChild = this.getFirstFocusableChild(control)
       if (!firstFocusableChild) {
         throw new Error(`FocusManager: You cannot focus a control with type 'group' unless it has focusable children, as focus is transferred directly to a child.`)
@@ -431,41 +455,35 @@ class FocusManager {
       }
     }
     else if (this.runningFocusLifecycle) {
-      throw new Error("FocusManager: You may not call 'focus' within a lifecycle method other than 'controlWillReceiveFocus'.")
+      throw new Error("FocusManager: You may not call 'focus' within a controller method other than 'controlWillReceiveFocus'.")
     }
     else {
       this.runningFocusLifecycle = true
 
-      // Call lifecycles on old control and path
+      // Call controllers on old control and path
       if (oldControl) {
-        const cwlfLifecycle = oldControl.lifecycle.controlWillLoseFocus
-        if (cwlfLifecycle) {
-          cwlfLifecycle()
-        }
-
-        // Work backwords from closest to old control, to closest to root
-        for (let id of pathLosingFocus) {
-          const cwlfLifecycle = this.controls[id].lifecycle.childrenWillLoseFocus
-          if (cwlfLifecycle) {
-            cwlfLifecycle()
-          }
-        }
+        callWillLoseFocusLifecycle(
+          oldControl,
+          pathLosingFocus.map(id => this.controls[id])
+        )
       }
     }
 
     // Store the current id for access by any calls to `focus()` which are
-    // made within the `controllWillReceiveFocus()` lifecycle
+    // made within the `controllWillReceiveFocus()` controller
     this.runningControlWillReceiveFocus = id
 
-    if (lifecycle.controlWillReceiveFocus) {
-      lifecycle.controlWillReceiveFocus()
+    if (controller.controlWillReceiveFocus) {
+      controller.controlWillReceiveFocus()
     }
 
     // If we're focusing a group and have reached this point without something
     // else being manually focused, then we should focus its first or last
     // available child (depending on the direction we came from).
     if (type === 'group') {
-      // TODO: if oldControl doesn't exist or oldControl has a different modalId, use latest control instead of first/last
+      // TODO:
+      // - if focusing by mouse, or oldControl doesn't exist, or oldControl has
+      //   a different modalId, use latest control instead of first/last
       if (!oldControl || this.isLeftOrderedBeforeRight(oldControl, control)) {
         this.focus(firstFocusableChild.id)
       }
@@ -489,19 +507,20 @@ class FocusManager {
     }
 
     for (let id of pathReceivingFocus) {
-      const cwrfLifecycle = this.controls[id].lifecycle.childrenWillReceiveFocus
+      const controller = this.controls[id].controller
+      const cwrfLifecycle = controller.childrenWillReceiveFocus
       if (cwrfLifecycle) {
-        cwrfLifecycle()
+        cwrfLifecycle.call(controller)
       }
     }
 
-    const tabIndexChanges = {}
+    const tabOffsetChanges = {}
 
     // Remove tabIndexes from any controls in a blurred modal
     let didModalBlur
     for (let blurId of pathLosingFocus) {
       if (this.controls[blurId].type === 'modal') {
-        Object.assign(tabIndexChanges, this.getModalOffsets(blurId, null))
+        Object.assign(tabOffsetChanges, this.getModalOffsets(blurId, null))
         didModalBlur = true
         break
       }
@@ -511,7 +530,7 @@ class FocusManager {
     let didModalFocus
     for (let focusId of pathReceivingFocus) {
       if (this.controls[focusId].type === 'modal') {
-        Object.assign(tabIndexChanges, this.getModalOffsets(focusId))
+        Object.assign(tabOffsetChanges, this.getModalOffsets(focusId, 0))
         this.currentModalId = focusId
         didModalFocus = true
         break
@@ -522,7 +541,7 @@ class FocusManager {
     // need to remove tabIndexes from the existing modal
     if (didModalFocus && !didModalBlur) {
       const topModalId = pathKeepingFocus.find(id => this.controls[id].type === 'modal')
-      Object.assign(tabIndexChanges, this.getModalOffsets(topModalId, null))
+      Object.assign(tabOffsetChanges, this.getModalOffsets(topModalId, null))
     }
 
     // If we've blurred a modal without focusing a new one, find the topmost
@@ -530,68 +549,53 @@ class FocusManager {
     if (didModalBlur && !didModalFocus) {
       const topModalId = pathKeepingFocus.find(id => this.controls[id].type === 'modal')
       this.currentModalId = topModalId
-      Object.assign(tabIndexChanges, this.getModalOffsets(topModalId))
+      Object.assign(tabOffsetChanges, this.getModalOffsets(topModalId, 0))
     }
 
     // The order here is important - if the same id appears multiple times in
     // this list, the last offset will win. Note that top id can be identical
     // to previous or control ids.
-    tabIndexChanges[this.relatedIds.previousId] = null
-    tabIndexChanges[this.relatedIds.nextId] = null
+    tabOffsetChanges[this.relatedIds.previousId] = null
+    tabOffsetChanges[this.relatedIds.nextId] = null
     if (oldControl) {
-      tabIndexChanges[oldControl.id] = null
-      tabIndexChanges[oldControl.top.id] = oldControl.modalId === control.modalId ? 0 : null
+      tabOffsetChanges[oldControl.id] = null
+      tabOffsetChanges[oldControl.top.id] = oldControl.modalId === control.modalId ? 0 : null
     }
 
     this.currentId = id
     this.calculateRelated()
-    tabIndexChanges[control.top.id] = null
-    tabIndexChanges[this.relatedIds.previousId] = -1
-    tabIndexChanges[this.relatedIds.nextId] = 1
-    tabIndexChanges[control.id] = 0
-    this.changeTabIndexes(tabIndexChanges)
+    tabOffsetChanges[control.top.id] = null
+    tabOffsetChanges[this.relatedIds.previousId] = -1
+    tabOffsetChanges[this.relatedIds.nextId] = 1
+    tabOffsetChanges[control.id] = 0
+    this.setTabOffsets(tabOffsetChanges)
 
-    if (node) {
-      this.focusingNode = true
-      node.focus()
-      this.focusingNode = false
-    }
+    this.backend.focus(id)
 
     for (let i = 0; i < path.length; i++) {
       this.controls[path[i]].latest = path.slice(i+1).concat(id)
     }
 
-    // Call "DidLose" lifecycles on old control and path
+    // Call "DidLose" controllers on old control and path
     if (oldControl) {
-      for (let id of pathLosingFocus.reverse()) {
-        // Need to check if the control still exists, as it may have been
-        // destroyed in an earlier lifecycle
-        const control = this.controls[id]
-        const cdlfLifecycle = control && control.lifecycle.childrenDidLoseFocus
-        if (cdlfLifecycle) {
-          cdlfLifecycle()
-        }
-      }
-
-      // Need to check if the control still exists, as it may have been
-      // destroyed in an earlier lifecycle
-      const cdlfLifecycle = this.controls[oldControl.id] && this.controls[oldControl.id].lifecycle.controlDidLoseFocus
-      if (cdlfLifecycle) {
-        cdlfLifecycle()
-      }
+      callDidLoseFocusLifecycle(
+        pathLosingFocus.reverse().map(id => this.controls[id]),
+        oldControl
+      )
     }
 
-    // Call "DidReceive" lifecycles on new control and path
+    // Call "DidReceive" controllers on new control and path
     for (let id of pathReceivingFocus.reverse()) {
-      const cdrfLifecycle = this.controls[id].lifecycle.childrenDidReceiveFocus
+      const controller = this.controls[id].controller
+      const cdrfLifecycle = controller.childrenDidReceiveFocus
       if (cdrfLifecycle) {
-        cdrfLifecycle()
+        cdrfLifecycle.call(controller)
       }
     }
 
-    const cdrfLifecycle = control.lifecycle.controlDidReceiveFocus
+    const cdrfLifecycle = control.controller.controlDidReceiveFocus
     if (cdrfLifecycle) {
-      cdrfLifecycle()
+      cdrfLifecycle.call(control.controller)
     }
 
     this.runningFocusLifecycle = false
@@ -606,101 +610,58 @@ class FocusManager {
 
     const control = this.controls[this.currentId]
 
-    // TODO: refactor this lifecycle stuff that is common with `focus()` into a helper
-    const cwlfLifecycle = control.lifecycle.controlWillLoseFocus
-    if (cwlfLifecycle) {
-      cwlfLifecycle()
-    }
+    callWillLoseFocusLifecycle(
+      control,
+      control.path.slice(0).reverse().map(id => this.controls[id])
+    )
 
-    // Work backwords from closest to old control, to closest to root
-    for (let id of control.path.slice(0).reverse()) {
-      const cwlfLifecycle = this.controls[id].lifecycle.childrenWillLoseFocus
-      if (cwlfLifecycle) {
-        cwlfLifecycle()
-      }
-    }
-
-    const tabIndexChanges = {}
-
+    const tabOffsetChanges = {}
     if (this.currentModalId) {
-      Object.assign(tabIndexChanges, this.getModalOffsets(this.currentModalId, null))
-      Object.assign(tabIndexChanges, this.getModalOffsets())
+      Object.assign(tabOffsetChanges, this.getModalOffsets(this.currentModalId, null))
+      Object.assign(tabOffsetChanges, this.getModalOffsets(undefined, 0))
     }
     else {
-      tabIndexChanges[this.relatedIds.previousId] = null
-      tabIndexChanges[this.relatedIds.nextId] = null
-      tabIndexChanges[control.id] = null
-      tabIndexChanges[control.top.id] = 0
+      tabOffsetChanges[this.relatedIds.previousId] = null
+      tabOffsetChanges[this.relatedIds.nextId] = null
+      tabOffsetChanges[control.id] = null
+      tabOffsetChanges[control.top.id] = 0
     }
 
-    this.changeTabIndexes(tabIndexChanges)
+    this.setTabOffsets(tabOffsetChanges)
     this.currentId = undefined
     this.currentModalId = undefined
-    if (control.node) {
-      control.node.blur()
-    }
+    this.backend.blur()
 
-    for (let id of control.path) {
+    callDidLoseFocusLifecycle(
+      control.path.map(id => this.controls[id]),
+
       // Need to check if the control still exists, as it may have been
-      // destroyed in an earlier lifecycle
-      const control = this.controls[id]
-      const cdlfLifecycle = control && control.lifecycle.childrenDidLoseFocus
-      if (cdlfLifecycle) {
-        cdlfLifecycle()
-      }
-    }
-
-    // Need to check if the control still exists, as it may have been
-    // destroyed in an earlier lifecycle
-    const oldControl = this.controls[control.id]
-    const cdlfLifecycle = oldControl && oldControl.lifecycle.controlDidLoseFocus
-    if (cdlfLifecycle) {
-      cdlfLifecycle()
-    }
+      // destroyed in an earlier controller
+      this.controls[control.id]
+    )
 
     this.runningFocusLifecycle = false
   }
 
   // ---
 
-  setTabIndex(id, offset=0) {
+  setTabOffset(id, offset) {
     const control = this.controls[id]
 
-    if (offset === false) {
-      if (control.tabIndex !== undefined) {
-        delete control.tabIndex
-        if (control.node) {
-          control.node.tabIndex = undefined
-        }
-      }
-      return
+    let tabIndex = -1
+    if (typeof offset === 'number') {
+      const topIndex = control.path.length === 0 ? control.index : this.controls[control.path[0]].index
+      tabIndex = topIndex*2 + (topIndex === 0 ? 0 : offset)
     }
 
-    if (offset === null) {
-      if (control.tabIndex !== -1) {
-        control.tabIndex = -1
-        if (control.node) {
-          control.node.tabIndex = -1
-        }
-      }
-      return
-    }
-
-    const topIndex = control.path.length === 0 ? control.index : this.controls[control.path[0]].index
-    const tabIndex = topIndex*2 + (topIndex === 0 ? 0 : offset)
-    if (tabIndex !== control.tabIndex) {
-      control.tabIndex = tabIndex
-      if (control.node) {
-        control.node.tabIndex = tabIndex
-      }
-    }
+    this.backend.setTabIndex(id, tabIndex)
   }
 
-  changeTabIndexes(changes) {
+  setTabOffsets(changes) {
     const ids = Object.keys(changes)
     for (let id of ids) {
       if (id !== 'undefined') {
-        this.setTabIndex(id, changes[id])
+        this.setTabOffset(id, changes[id])
       }
     }
   }
@@ -731,14 +692,18 @@ class FocusManager {
     return left.path.length < right.path.length
   }
 
-  getFirstFocusableChild(control) {
-    for (let childId of control.children) {
+  getFirstFocusableChild(control, reverse=false) {
+    const children = reverse
+      ? control.children.slice(0).reverse()
+      : control.children
+
+    for (let childId of children) {
       const child = this.controls[childId]
       if (child.type === 'focusable') {
         return child
       }
       else if (child.type === 'group') {
-        const first = this.getFirstFocusableChild(child)
+        const first = this.getFirstFocusableChild(child, reverse)
         if (first) {
           return first
         }
@@ -747,19 +712,7 @@ class FocusManager {
   }
 
   getLastFocusableChild(control) {
-    // TODO: can this be refactored to share code with getFirstFocusableChild?
-    for (let childId of control.children.slice(0).reverse()) {
-      const child = this.controls[childId]
-      if (child.type === 'focusable') {
-        return child
-      }
-      else if (child.type === 'group') {
-        const last = this.getLastFocusableChild(child)
-        if (last) {
-          return last
-        }
-      }
-    }
+    return this.getFirstFocusableChild(control, true)
   }
 
   // Find the index within `children` at which to insert `control`
@@ -824,18 +777,21 @@ class FocusManager {
     }
   }
 
-  getModalOffsets(modalId, forceTo) {
-    const tabIndexes = {}
-    const children = modalId ? this.controls[modalId].children : Object.keys(this.controls).filter(id => !this.controls[id].parent)
+  getModalChildIds(modalId) {
+    const children =
+      modalId
+        ? this.controls[modalId].children
+        : Object.keys(this.controls).filter(id => !this.controls[id].parent)
 
-    for (let childId of children) {
-      const childControl = this.controls[childId]
-      if (childControl.type !== 'modal') {
-        tabIndexes[childId] = forceTo === undefined ? 0 : null
-      }
+    return children.filter(id => this.controls[id].type !== 'modal')
+  }
+
+  getModalOffsets(modalId, offset) {
+    const result = {}
+    for (let id of this.getModalChildIds(modalId)) {
+      result[id] = offset
     }
-
-    return tabIndexes
+    return result
   }
 }
 
@@ -868,11 +824,11 @@ class FocusManagerInterface {
    * - getItem is a function that should return a plain JavaScript object that
    *   can represent the control to parent controls.
    */
-  addControl(type, index, lifecycle, getItem) {
+  addControl(type, index, controller, getItem) {
     const id = getNextUniqueId()
     const childFocusManager = new FocusManagerInterface(this.focusManager, this.path.concat(id))
 
-    this.focusManager.addControl(id, this.path, type, index, lifecycle)
+    this.focusManager.addControl(id, this.path, type, index, controller)
     this.childIds.push(id)
     this.getItems[id] = getItem
 
@@ -908,10 +864,6 @@ class FocusManagerInterface {
     return this.childIds
   }
 
-  setNode(id, node) {
-    this.focusManager.setNode(id, node)
-  }
-
   /**
    * Update the index of a given control. This will be used as a tabindex if
    * the element can receive a tabindex, or otherwise will be used to define
@@ -924,7 +876,7 @@ class FocusManagerInterface {
   /**
    * Programatically focus a control added via this interface's `addControl`.
    * Note that this does not perform that actual focusing -- it only updates
-   * the attributes. The controller will still need to call `node.focus()`
+   * the attributes.
    */
   focus(id, direct) {
     this.focusManager.focus(id, direct)

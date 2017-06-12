@@ -145,7 +145,6 @@ export default class FocusController extends Controller {
       return
     }
 
-    this.focusManager.setNode(this.id, node)
     this.focusManager.backend.connect(this.id, node)
 
     if (!this.node) {

@@ -12,6 +12,9 @@ class FocusBackend {
     this.manager = manager
 
     this.nodeIds = new WeakMap
+    this.nodes = {}
+    this.tabIndexes = {}
+
     this.timeout = null
 
     this.handleCaptureFocus = this.handleCaptureFocus.bind(this)
@@ -54,6 +57,7 @@ class FocusBackend {
 
   connect(id, node) {
     this.nodeIds.set(node, id)
+    this.nodes[id] = node
 
     const handleBlur =
       isIE
@@ -64,31 +68,72 @@ class FocusBackend {
 
     node.addEventListener(eventName, handleBlur)
 
+    if (this.tabIndexes[id] !== undefined) {
+      node.tabIndex = this.tabIndexes[id]
+    }
+    if (this.manager.currentId === id) {
+      this.focus(id)
+    }
+
     return () => {
       node.removeEventListener(eventName, handleBlur);
       this.nodeIds.delete(node)
+      delete this.nodes[id]
+      delete this.tabIndexes[id]
+    }
+  }
+
+  setTabIndex(id, tabIndex) {
+    const node = this.nodes[id]
+    const oldTabIndex = this.tabIndexes[id]
+    this.tabIndexes[id] = tabIndex
+    if (node && oldTabIndex !== tabIndex) {
+      node.tabIndex = tabIndex
+    }
+  }
+
+  focus(id) {
+    const node = this.nodes[id]
+    if (node) {
+      this._isFocusing = true
+      node.focus()
+      this._isFocusing = false
+    }
+  }
+
+  blur(id) {
+    const node = this.nodes[id]
+    if (node) {
+      this._isBlurring = true
+      node.blur()
+      this._isBlurring = false
     }
   }
 
   handleCaptureFocus(e) {
     this.clearTimeout()
 
-    const id = this.nodeIds.get(e.target)
+    if (!this._isFocusing) {
+      const id = this.nodeIds.get(e.target)
 
-    if (!id) {
-      this.manager.blur()
-    }
-    else {
-      this.manager.focus(id)
+      if (!id) {
+        this.manager.blur()
+      }
+      else {
+        // TODO: pass a bool that indicates whether tab was pressed or not
+        this.manager.focus(id)
+      }
     }
   }
 
   handleBlur(e, id) {
-    if (!isOldFirefox && !e.relatedTarget) {
-      this.manager.blur()
-    }
-    else {
-      this.waitForFocus()
+    if (!this._isBlurring) {
+      if (!isOldFirefox && !e.relatedTarget) {
+        this.manager.blur()
+      }
+      else {
+        this.waitForFocus()
+      }
     }
   }
 
