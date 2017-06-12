@@ -25,7 +25,7 @@ function transformRoot(el, prefix, props) {
 
 
 export default function createPrefixer(...names) {
-  const prefix = 'RA_'+names.join('_')
+  const prefix = 'armo_'+names.join('_')
   function prefixComponent(component, forcedName) {
     const name = forcedName || component.displayName || component.name
     let componentPrefix = prefix

@@ -1,96 +1,29 @@
 import './Switch.less'
 import React, { Component } from 'react'
-import { controlledBy } from '../src/controllers'
-import { createFocusBackend, FocusController, createFocusManager } from '../src/focus'
-import withDefaultProps from 'util/withDefaultProps'
+import cx from 'classnames'
+import { createFocusBackend, createFocusManager } from '../src/focus'
+import Switch from '../src/controls/Switch'
+import Option from '../src/controls/Option'
+import createPrefixer from '../src/util/createPrefixer'
+
+const prefix = createPrefixer('examples', 'Switch')
 
 
-class SwitchFocusController extends FocusController {
-  controlWillReceiveFocus() {
-    this.actions.focusFirstMatch(value => {
-      return value === this.props.bus.value
-    })
-  }
-}
+const SwitchView = prefix(function SwitchView({ connect, focused, children }) {
+  return connect(
+    <div className={cx({ focused })}>
+      {children}
+    </div>
+  )
+})
 
-class OptionFocusController extends FocusController {
-  getItem() {
-    return this.props.value
-  }
-}
-
-
-@controlledBy(SwitchFocusController)
-class Switch extends Component {
-  render() {
-    const props = this.props
-
-    const bus = {
-      ...this.props.bus,
-      onFocus: this.handleChildFocus,
-    }
-
-    const content =
-      typeof props.children === 'function'
-        ? props.children(bus)
-        : React.Children.map(props.children, child => React.cloneElement(child, { bus }))
-
-    return this.props.connectFocusable(
-      <div onKeyDown={this.handleKeyDown}>
-        SWITCH
-        {content}
-      </div>
-    )
-  }
-
-  handleChildFocus = (value) => {
-    if (this.props.bus.onChange) {
-      this.props.bus.onChange(value)
-    }
-  }
-
-  handleKeyDown = (event) => {
-    switch (event.key) {
-      case "ArrowDown":
-      case "ArrowRight":
-        event.preventDefault()
-        event.stopPropagation()
-        this.props.taxi.focusNext()
-        break
-
-      case "ArrowUp":
-      case "ArrowLeft":
-        event.preventDefault()
-        event.stopPropagation()
-        this.props.taxi.focusPrevious()
-        break
-
-      // TODO:
-      // - handle home/end or command+arrow to move to beginning/end
-      // - handle search (will need to put label in option items)
-    }
-  }
-}
-
-@controlledBy(OptionFocusController)
-class Option extends Component {
-  render() {
-    const props = this.props
-
-    const style = {}
-
-    if (props.value === props.bus.value) {
-      style.backgroundColor = 'blue'
-      style.color = 'white'
-    }
-
-    return props.connectFocusable(
-      <div style={style}>
-        {props.children}
-      </div>
-    )
-  }
-}
+const OptionView = prefix(function OptionView({ connect, focused, active, children }) {
+  return connect(
+    <div className={cx({ focused, active })}>
+      {children}
+    </div>
+  )
+})
 
 
 export default class FocusExample extends Component {
@@ -121,15 +54,17 @@ export default class FocusExample extends Component {
 
     return (
       <div>
-        <Switch bus={bus}>
-          <Option value='au'>Australia</Option>
-          <Option value='ja'>Japan</Option>
+        <Switch bus={bus} view={SwitchView}>
+          <Option value='au' view={OptionView}>Australia</Option>
+          <Option value='ja' view={OptionView}>Japan</Option>
         </Switch>
-        <Switch bus={bus}>
+
+        <Switch bus={bus} view={SwitchView}>
           {this.state.options.map(([value, label], i) =>
-            <Option value={value} key={value}>{label}</Option>
+            <Option value={value} key={value} view={OptionView}>{label}</Option>
           )}
         </Switch>
+
         <button onClick={this.addOption}>
           Add option
         </button>
