@@ -24,6 +24,11 @@ class FocusBackend {
   }
 
 
+  destroy() {
+    this.teardown()
+  }
+
+
   get window() {
     if (typeof window !== 'undefined') {
       return window;
@@ -50,6 +55,8 @@ class FocusBackend {
     if (this.window === undefined) {
       return
     }
+
+    this.window.__isFocusBackendSetUp = false
 
     this.window.removeEventListener('focus', this.handleCaptureFocus, true)
   }

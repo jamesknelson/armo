@@ -59,7 +59,8 @@ class FocusManager {
   }
 
   destroy() {
-    console.log('TODO: destroyabole focus manager')
+    // TODO: destroy things properly
+    this.backend.destroy()
   }
 
   addControl(id, path, type, index, controller) {
@@ -172,7 +173,7 @@ class FocusManager {
   }
 
   destroyControl(id) {
-    const { parent, path, type, top } = this.controls[id]
+    const { parent, children, path, type, top } = this.controls[id]
 
     if (children.length) {
       throw new Error('FocusManager: You cannot destroy a control while it still has child controls.')
@@ -813,6 +814,7 @@ class FocusManagerInterface {
     this.focusManager = focusManager
     this.path = path
     this.controlIds = []
+    this.controlIndexes = {}
     this.controllers = {}
   }
 
@@ -843,20 +845,21 @@ class FocusManagerInterface {
     this.focusManager.addControl(id, this.path, type, index, controller)
     this.controlIds.push(id)
     this.controllers[id] = controller
+    this.controlIndexes[id] = index
 
     return {
       id,
       childFocusManager,
-      destroyControl: this.destroy.bind(this, id),
-    }
-  }
-
-  destroyControl(id) {
-    const index = this.controlIds.indexOf(id)
-    if (index !== -1) {
-      this.controlIds.splice(index, 1)
-      this.focusManager.destroyControl(id)
-      delete this.controllers[id]
+      destroyControl: () => {
+        const index = this.controlIds.indexOf(id)
+        if (index !== -1 && this.focusManager) {
+          childFocusManager.destroy()
+          this.controlIds.splice(index, 1)
+          this.focusManager.destroyControl(id)
+          delete this.controllers[id]
+          delete this.controlIndexes[id]
+        }
+      },
     }
   }
 
@@ -876,12 +879,13 @@ class FocusManagerInterface {
    * Return a list of all child ids for a control added via this interface,
    * ordered by control index.
    *
-   * This can be used to implement `focusFirstMatchingChild(predicate)` or
-   * `seekFocus(n)` within the controller whn used with `getChildItem(id)`.
+   * This can be used to implement `focusFirstMatch(predicate)` or
+   * `seekFocus(n)` within the controller when used with `getChildItem(id)`.
    */
   getIds() {
-    // TODO: return this in order of the child's control index
-    return this.controlIds
+    return this.controlIds.sort((b, a) =>
+      compareSiblingControls({ id: a, index: this.controlIndexes[a] }, { id: b, index: this.controlIndexes[b] })
+    )
   }
 
   /**
@@ -890,6 +894,7 @@ class FocusManagerInterface {
    * movement order for `seekFocus()`.
    */
   setControlIndex(id, index) {
+    this.controlIndexes[id] = index
     this.focusManager.setControlIndex(id, index)
   }
 

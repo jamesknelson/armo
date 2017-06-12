@@ -235,12 +235,13 @@ export default function connectControllers(controllerPropNames) {
         if (--this.transactionLevel === 0) {
           if (this.changesExist) {
             ++this.flushLevel
+
             this.changesExist = false
-            // TODO
-            // - ensure that any prop updates we receive while flushing are
-            //   not caused by children. to do this, we set up a dummy flush,
-            //   and throw an error if any updates are received after its
-            //   callback is executed
+            // Ensure that any prop updates we receive while flushing are
+            // not caused by children by setting up a dummy flush,
+            // and throw an error if any updates are received after its
+            // callback is executed. Any updates that are already queued
+            // should be received before its callback
             this.preventChanges = false
             this.setState({ $dummy: {} }, () => {
               this.preventChanges = true

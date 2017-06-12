@@ -97,8 +97,14 @@ export default class FocusExample extends Component {
   constructor(props) {
     super(props)
     this.focusManager = createFocusManager(createFocusBackend)
+    this.nextOption = 1
     this.state = {
       value: 'au',
+      options: [
+        ['au', 'Australia'],
+        ['ja', 'Japan'],
+        ['us', 'United States']
+      ]
     }
   }
 
@@ -120,12 +126,21 @@ export default class FocusExample extends Component {
           <Option value='ja'>Japan</Option>
         </Switch>
         <Switch bus={bus}>
-          <Option value='au'>Australia</Option>
-          <Option value='ja'>Japan</Option>
-          <Option value='us'>United States</Option>
+          {this.state.options.map(([value, label], i) =>
+            <Option value={value} key={value}>{label}</Option>
+          )}
         </Switch>
+        <button onClick={this.addOption}>
+          Add option
+        </button>
       </div>
     )
+  }
+
+  addOption = () => {
+    this.setState({
+      options: this.state.options.concat([[String(this.nextOption), `Option ${this.nextOption++}`]])
+    })
   }
 
   handleChange = (value) => {

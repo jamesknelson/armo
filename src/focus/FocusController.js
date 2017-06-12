@@ -82,13 +82,16 @@ export default class FocusController extends Controller {
       const childFocusManager = this.state.childFocusManager
       if (childFocusManager) {
         const currentId = childFocusManager.getCurrentId()
+        const ids = childFocusManager.getIds()
         if (currentId) {
-          const ids = childFocusManager.getIds()
           const index = ids.indexOf(currentId)
           if (index !== 0) {
             childFocusManager.focus(ids[index - 1])
             return true
           }
+        }
+        else if (ids.length) {
+          childFocusManager.focus(ids[ids.length - 1])
         }
       }
       return false
@@ -98,14 +101,17 @@ export default class FocusController extends Controller {
       const childFocusManager = this.state.childFocusManager
       if (childFocusManager) {
         const currentId = childFocusManager.getCurrentId()
+        const ids = childFocusManager.getIds()
         if (currentId) {
-          const ids = childFocusManager.getIds()
           const index = ids.indexOf(currentId)
           const nextId = ids[index + 1]
           if (nextId) {
             childFocusManager.focus(nextId)
             return true
           }
+        }
+        else if (ids.length) {
+          childFocusManager.focus(ids[0])
         }
       }
       return false
@@ -126,7 +132,9 @@ export default class FocusController extends Controller {
   }
 
   controllerWillReceiveProps(nextProps) {
-
+    if (this.props.focusIndex !== nextProps.focusIndex) {
+      this.focusManager.setControlIndex(this.id, nextProps.focusIndex)
+    }
   }
 
   /**
@@ -163,15 +171,6 @@ export default class FocusController extends Controller {
     if (!this.node) {
       return
     }
-
-    if (this.focusManager) {
-      this.destroyFocusManager()
-    }
-  }
-
-  destroyFocusManager() {
-    this.unsubscribe()
-    this.focusManager = null
   }
 
   handleRef = (node) => {
@@ -186,13 +185,11 @@ export default class FocusController extends Controller {
       return
     }
 
-    this.focusManager.backend.connect(this.id, node)
-
     if (!this.node) {
-      this.destroyFocusManager()
+      this.destroyControl()
     }
     else {
-      // this.focusManager.receiveNode(this.focusableId, node)
+      this.focusManager.backend.connect(this.id, node)
     }
   }
 
