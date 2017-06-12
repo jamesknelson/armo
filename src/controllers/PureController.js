@@ -1,8 +1,8 @@
-import shallowCompare from './shallowCompare'
+import shallowCompare from '../util/shallowCompare'
 import Controller from './Controller'
 
 export default class PureController extends Controller {
-  reconcile(a, b) {
-    return shallowCompare(a, b)
+  shouldCalculateOutput(previousProps, previousState) {
+    return !shallowCompare(this.props, previousProps) || !shallowCompare(this.state, previousState)
   }
 }

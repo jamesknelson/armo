@@ -366,7 +366,9 @@ class FocusManager {
     this.setTabOffsets(tabOffsetChanges)
   }
 
-  focus(id, direct=false) {
+  focus(specifiedId, direct=false) {
+    let id = specifiedId
+
     // If we're not specifically focusing this id, see if it has a previously
     // focused child that still exists that we can focus instead.
     // Note: we don't do this for groups, as the best child to focus depends
@@ -385,6 +387,11 @@ class FocusManager {
     let oldControl
     if (this.currentId) {
       if (this.currentId === id) {
+        if (specifiedId !== id) {
+          // If the user has clicked on a parent id that auto-redirects to
+          // the existing control, we'll need to force the focus back to it.
+          this.backend.focus(id)
+        }
         return
       }
       oldControl = this.controls[this.currentId]
@@ -404,6 +411,9 @@ class FocusManager {
       let nextParent = currentControl && currentControl.parent
       while (nextParent) {
         if (nextParent === control) {
+          // If this is in response to a browser focus event, we'll need to
+          // force the focus back to the old control.
+          this.focus(this.currentId)
           return
         }
         nextParent = nextParent.parent
@@ -451,6 +461,8 @@ class FocusManager {
       const currentlyFocusingId = this.runningControlWillReceiveFocus
 
       if (path.indexOf(currentlyFocusingId) === -1) {
+        console.error(currentlyFocusingId, path)
+
         throw new Error("FocusManager: You may only focus a child within 'controlWillReceiveFocus'.")
       }
     }
@@ -800,8 +812,8 @@ class FocusManagerInterface {
   constructor(focusManager, path) {
     this.focusManager = focusManager
     this.path = path
-    this.childIds = []
-    this.getItems = {}
+    this.controlIds = []
+    this.controllers = {}
   }
 
   destroy() {
@@ -810,7 +822,7 @@ class FocusManagerInterface {
     }
 
     this.focusManager = null
-    this.getItems = null
+    this.controllers = null
   }
 
   get backend() {
@@ -824,13 +836,13 @@ class FocusManagerInterface {
    * - getItem is a function that should return a plain JavaScript object that
    *   can represent the control to parent controls.
    */
-  addControl(type, index, controller, getItem) {
+  addControl(type, index, controller) {
     const id = getNextUniqueId()
     const childFocusManager = new FocusManagerInterface(this.focusManager, this.path.concat(id))
 
     this.focusManager.addControl(id, this.path, type, index, controller)
-    this.childIds.push(id)
-    this.getItems[id] = getItem
+    this.controlIds.push(id)
+    this.controllers[id] = controller
 
     return {
       id,
@@ -840,16 +852,24 @@ class FocusManagerInterface {
   }
 
   destroyControl(id) {
-    const index = this.childIds.indexOf(id)
+    const index = this.controlIds.indexOf(id)
     if (index !== -1) {
-      this.childIds.splice(index, 1)
+      this.controlIds.splice(index, 1)
       this.focusManager.destroyControl(id)
-      delete this.getItems[id]
+      delete this.controllers[id]
     }
   }
 
-  getChildItem(id) {
-    this.getItems[id]()
+  getItem(id) {
+    const controller = this.controllers[id]
+    if (controller.getItem) {
+      return controller.getItem.call(controller)
+    }
+  }
+
+  getCurrentId() {
+    const currentId = this.focusManager.currentId
+    return this.controlIds.indexOf(currentId) === -1 ? undefined : currentId
   }
 
   /**
@@ -859,9 +879,9 @@ class FocusManagerInterface {
    * This can be used to implement `focusFirstMatchingChild(predicate)` or
    * `seekFocus(n)` within the controller whn used with `getChildItem(id)`.
    */
-  getChildIds() {
+  getIds() {
     // TODO: return this in order of the child's control index
-    return this.childIds
+    return this.controlIds
   }
 
   /**

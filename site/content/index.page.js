@@ -7,5 +7,8 @@ export default {
     require('../../examples/Focus.example.js').set({
       title: 'Focus'
     }),
+    require('../../examples/Switch.example.js').set({
+      title: 'Switch'
+    }),
   ]
 }

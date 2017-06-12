@@ -34,6 +34,7 @@ Truths:
 import React from 'react'
 import PropTypes from 'prop-types'
 import Controller from '../controllers/Controller'
+import shallowCompare from '../util/shallowCompare'
 
 
 export default class FocusController extends Controller {
@@ -64,13 +65,58 @@ export default class FocusController extends Controller {
       if (this.focusManager) {
         this.focusManager.focus(this.focusableId)
       }
+    },
+
+    focusFirstMatch(predicate) {
+      const childFocusManager = this.state.childFocusManager
+      if (childFocusManager) {
+        for (let id of childFocusManager.getIds()) {
+          if (predicate(childFocusManager.getItem(id))) {
+            return childFocusManager.focus(id)
+          }
+        }
+      }
+    },
+
+    focusPrevious() {
+      const childFocusManager = this.state.childFocusManager
+      if (childFocusManager) {
+        const currentId = childFocusManager.getCurrentId()
+        if (currentId) {
+          const ids = childFocusManager.getIds()
+          const index = ids.indexOf(currentId)
+          if (index !== 0) {
+            childFocusManager.focus(ids[index - 1])
+            return true
+          }
+        }
+      }
+      return false
+    },
+
+    focusNext() {
+      const childFocusManager = this.state.childFocusManager
+      if (childFocusManager) {
+        const currentId = childFocusManager.getCurrentId()
+        if (currentId) {
+          const ids = childFocusManager.getIds()
+          const index = ids.indexOf(currentId)
+          const nextId = ids[index + 1]
+          if (nextId) {
+            childFocusManager.focus(nextId)
+            return true
+          }
+        }
+      }
+      return false
     }
   }
 
   constructor(props) {
     super(props)
     this.receiveFocusManager(this.props.bus.focusManager)
-    const result = this.focusManager.addControl(this.props.focusableType, this.props.focusIndex, this, this.getItem)
+    this.getItem = this.getItem.bind(this)
+    const result = this.focusManager.addControl(this.props.focusableType, this.props.focusIndex, this)
     this.id = result.id
     this.destroyControl = result.destroyControl
     this.state = {
@@ -99,9 +145,6 @@ export default class FocusController extends Controller {
 
   linkToFocusManager() {
     this.focusManager(type, index, lifecycle, node, getItem)
-
-
-    //props.focusManager.
   }
 
   connectFocusable = (el) => {
@@ -131,8 +174,6 @@ export default class FocusController extends Controller {
     this.focusManager = null
   }
 
-  getItem = () => this.props.value
-
   handleRef = (node) => {
     if (node === this.node) {
       return
@@ -155,20 +196,45 @@ export default class FocusController extends Controller {
     }
   }
 
-  childrenDidReceiveFocus = () => {
-    this.setState({ childrenFocused: true })
+  getItem() {
+    return this.props.bus.value
   }
 
-  childrenDidLoseFocus = () => {
-    this.setState({ childrenFocused: false })
+  controlWillReceiveFocus() {
+    this.setState({ receiving: true })
+  }
+  controlWillLoseFocus() {
+    this.setState({ receiving: true })
   }
 
-  controlDidReceiveFocus = () => {
-    this.setState({ focused: true })
+  childrenWillReceiveFocus() {
+    this.setState({ receiving: true })
+  }
+  childrenWillLoseFocus() {
+    this.setState({ receiving: true })
   }
 
-  controlDidLoseFocus = () => {
-    this.setState({ focused: false })
+  childrenDidReceiveFocus() {
+    this.setState({ childrenFocused: true, receiving: false })
+  }
+  childrenDidLoseFocus() {
+    this.setState({ childrenFocused: false, receiving: false })
+  }
+
+  controlDidReceiveFocus() {
+    if (this.props.bus.onFocus) {
+      this.props.bus.onFocus(this.getItem())
+    }
+
+    this.setState({ focused: true, receiving: false })
+  }
+  controlDidLoseFocus() {
+    this.setState({ focused: false, receiving: false })
+  }
+
+  shouldCalculateOutput(previousProps, previousState) {
+    // Do not change output when we expect another output, or when nothing has changed.
+    return !this.state.receiving && (!shallowCompare(this.props, previousProps) || !shallowCompare(this.state, previousState))
   }
 
   output() {
@@ -177,8 +243,10 @@ export default class FocusController extends Controller {
       focused: this.state.focused,
       childrenFocused: this.state.childrenFocused,
 
-      // TODO: delete this
-      id: this.id,
+      // A Taxi is a private bus, that should not be passed along to other controls
+      taxi: {
+        ...this.actions,
+      },
 
       bus: {
         ...this.props.bus,

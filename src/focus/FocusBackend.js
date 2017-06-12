@@ -95,7 +95,7 @@ class FocusBackend {
   focus(id) {
     const node = this.nodes[id]
     if (node) {
-      this._isFocusing = true
+      this._isFocusing = id
       node.focus()
       this._isFocusing = false
     }
@@ -104,7 +104,7 @@ class FocusBackend {
   blur(id) {
     const node = this.nodes[id]
     if (node) {
-      this._isBlurring = true
+      this._isBlurring = id
       node.blur()
       this._isBlurring = false
     }
@@ -113,20 +113,17 @@ class FocusBackend {
   handleCaptureFocus(e) {
     this.clearTimeout()
 
-    if (!this._isFocusing) {
-      const id = this.nodeIds.get(e.target)
-
-      if (!id) {
-        this.manager.blur()
-      }
-      else {
-        // TODO: pass a bool that indicates whether tab was pressed or not
-        this.manager.focus(id)
-      }
+    const id = this.nodeIds.get(e.target)
+    if (!id) {
+      this.manager.blur()
+    }
+    else if (this._isFocusing !== id) {
+      // TODO: pass a bool that indicates whether tab was pressed or not
+      this.manager.focus(id)
     }
   }
 
-  handleBlur(e, id) {
+  handleBlur(e) {
     if (!this._isBlurring) {
       if (!isOldFirefox && !e.relatedTarget) {
         this.manager.blur()
